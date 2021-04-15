@@ -9,7 +9,7 @@ class TrackState:
 
 class Track:
 
-    def __init__(self, current_target_state, track_bbox, track_id, max_age):
+    def __init__(self, current_target_state, track_bbox, track_id, max_age, payload=None):
         self.current_target_state = current_target_state
         self.track_bbox = track_bbox
         self.track_id = track_id
@@ -18,14 +18,16 @@ class Track:
         self._max_age = max_age
         self.overlap_history = [1]
         self.average_overlap = 1
+        self.payload = payload
 
     def predict(self, sess, siamese, input_image):
 
         self.current_target_state, self.track_bbox = siamese.track(sess, self.current_target_state, input_image)
         self.time_since_update += 1
 
-    def update(self, detection, det_embeding, mode, matched_iou=1.0, frame_rate=30):
+    def update(self, detection, det_embeding, mode, matched_iou=1.0, frame_rate=30, payload = None):
         self.time_since_update = 0
+        self.payload = payload
 
         if mode == 'tracked':
             self.overlap_history.append(1 if matched_iou > 0.5 else 0)

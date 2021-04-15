@@ -13,7 +13,8 @@ tf = tf.compat.v1
 tf.disable_v2_behavior()
 
 class MOT_Tracker:
-    def __init__(self, max_age, occlusion_thres, association_thres, iou_thres, context_amount, siamese_checkpoint):
+    def __init__(self, max_age, occlusion_thres, association_thres,
+         iou_thres, context_amount, siamese_checkpoint, frame_rate=None):
         self.max_age = max_age
         self.occlusion_thres = occlusion_thres
         self.association_thres = association_thres
@@ -21,7 +22,7 @@ class MOT_Tracker:
         self.sess = None
         self.tracks = []  # save all the targets
         self._next_id = 1
-        self.frame_rate = None
+        self.frame_rate = frame_rate
         self.iou_thres = iou_thres
         self.context_amount = context_amount
         self.siamese_checkpoint = siamese_checkpoint
@@ -121,25 +122,30 @@ class MOT_Tracker:
 
         return matches, np.array(unmatched_detections), np.array(unmatched_trackers), association_matrix
 
-    def initiate_track(self, detection, current_frame_path):
+    def initiate_track(self, detection, current_frame_path, payload):
         current_target_state = self.siamese.init_tracks(self.sess, detection, current_frame_path)
         self.tracks.append(Track(
-            current_target_state, detection, self._next_id, self.max_age))
+            current_target_state, detection, self._next_id, self.max_age, payload=payload))
         self._next_id += 1
 
-    def update(self, cv2_image, frame_id, detections):
+    # bbox_type : xywh, tlbr
+    def update(self, cv2_image, frame_id, detections, bbox_func = lambda x: x.tlwh, bbox_type='xywh', return_raw=False):
 
         if frame_id == 1:
             self.sess, self.siamese = self.initiate_siamese_tracker(self.siamese_checkpoint, self.context_amount)
-        dets = np.array([d.tlwh for d in detections])  # dets: [x1,y1,w,h]
+        dets = np.array([bbox_func(d) for d in detections])  # dets: [x1,y1,w,h]
         if len(dets) == 0:
             dets_tlrb = dets
         else:
             dets_tlrb = dets.copy()
-            dets_tlrb[:, 2:] += dets_tlrb[:, :2]  # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
+            if bbox_type == 'xywh':
+              dets_tlrb[:, 2:] += dets_tlrb[:, :2]  # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
+            elif bbox_type == 'tlbr':
+              dets[:, 2:] -= dets[:,:2]
+            else:
+              raise TypeError('bbox_type shouled be either xywh or tlbr')
 
         rgb_img = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-        # tf_image_tensor = cv2_image
 
         ###########################   STEP 1: occlusion detection   #######################
 
@@ -170,7 +176,7 @@ class MOT_Tracker:
                 d = int(matched[np.where(matched[:, 1] == t)[0], 0])
                 matched_iou = iou_matrix[d, t]
                 det_state = self.siamese.init_tracks(self.sess, dets[d, :4], rgb_img)  # TODO: batch prediction
-                trk.update(dets[d, :4], det_state.reid_templates, 'tracked', matched_iou, self.frame_rate)
+                trk.update(dets[d, :4], det_state.reid_templates, 'tracked', matched_iou, self.frame_rate, payload=detections[d])
             else: # update unmatched track
                 trk.overlap_history.append(0)
                 history_len = len(trk.overlap_history)
@@ -215,11 +221,11 @@ class MOT_Tracker:
         for t, trk in enumerate(lost_trks):
             if (t not in lost_unmatched_trks):
                 d = int(lost_matched[np.where(lost_matched[:, 1] == t)[0], 0])
-                trk.update(dets_tlwh1[d, :4], [dets_reid_embeding[d], dets_trk_embeding[d]], 'recover')
+                trk.update(dets_tlwh1[d, :4], [dets_reid_embeding[d], dets_trk_embeding[d]], 'recover', payload=detections[d])
 
         # initiate targets if not match with any dets
         for i in lost_unmatched_dets:
-            self.initiate_track(dets_tlwh1[i, :4], rgb_img)   # TODO: batch prediction
+            self.initiate_track(dets_tlwh1[i, :4], rgb_img, detections[i])   # TODO: batch prediction
 
         ###############################   STEP 4: post processing   ###############################
 
@@ -232,15 +238,18 @@ class MOT_Tracker:
                     wh):
                 self.tracks.pop(i)
 
-        # record results
-        for trk in reversed(self.tracks):
-            d = trk.track_bbox
-            if trk.is_tracked():
-                ret.append(np.concatenate((d, [trk.track_id])).reshape(1, -1))  # +1 as MOT benchmark requires positive
+        if return_raw:
+          return [t for t in self.tracks if t.is_tracked()]
+        else:
+          # record results
+          for trk in reversed(self.tracks):
+              d = trk.track_bbox
+              if trk.is_tracked():
+                  ret.append(np.concatenate((d, [trk.track_id])).reshape(1, -1))  # +1 as MOT benchmark requires positive
 
-        if (len(ret) > 0):
-            return np.concatenate(ret)
-        return np.empty((0, 5))
+          if (len(ret) > 0):
+              return np.concatenate(ret)
+          return np.empty((0, 5))
 
 
 

@@ -72,10 +72,13 @@ class InferenceWrapper():
     self.dumb_op = tf.no_op('dumb_operation')
 
   def build_inputs(self):
-    filename = tf.placeholder(tf.string, [], name='filename')
-    image_file = tf.read_file(filename)
-    image = tf.image.decode_jpeg(image_file, channels=3, dct_method="INTEGER_ACCURATE")
-    image = tf.to_float(image)
+    # filename = tf.placeholder(tf.string, [], name='image')
+    # image_file = tf.read_file(filename)
+    # image = tf.image.decode_jpeg(image_file, channels=3, dct_method="INTEGER_ACCURATE")
+
+    # image = tf.to_float(image)
+    # print('img shape', image.shape)
+    image = tf.placeholder(tf.float32, [None, None, 3], name='image')
 
     self.image = image
     self.target_bbox_feed = tf.placeholder(dtype=tf.float32,
@@ -228,20 +231,20 @@ class InferenceWrapper():
       self.response_up = response_up
 
   def initialize(self, sess, input_feed):
-    image_path, target_bbox = input_feed
-    _, _,  reid_templates = sess.run([self.scale_xs, self.init, self.reid_templates], feed_dict={'filename:0': image_path, "target_bbox_feed:0": target_bbox, })
+    image, target_bbox = input_feed
+    _, _,  reid_templates = sess.run([self.scale_xs, self.init, self.reid_templates], feed_dict={'image:0': image, "target_bbox_feed:0": target_bbox, })
     init_templates = self.init_templates.eval(session=sess)
 
     return init_templates, reid_templates
 
   def inference_step(self, sess, input_feed):
-    image_path, target_bbox, frame_templates = input_feed  #  input_feed = [filename, bbox_feed, templates]
+    image, target_bbox, frame_templates = input_feed  #  input_feed = [filename, bbox_feed, templates]
     log_level = self.track_config['log_level']
     image_cropped_op = self.search_images if log_level > 0 else self.dumb_op
     image_cropped, scale_xs, response_up, instance_track, instance_reid = sess.run(
       fetches=[image_cropped_op, self.scale_xs, self.response_up, self.embeds, self.reid_embeds],
       feed_dict={
-        "filename:0": image_path,
+        "image:0": image,
         "target_bbox_feed:0": target_bbox,
         "frame_templates_feed:0": frame_templates})
 

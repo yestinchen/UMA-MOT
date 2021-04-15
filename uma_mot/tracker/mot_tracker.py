@@ -13,7 +13,7 @@ tf = tf.compat.v1
 tf.disable_v2_behavior()
 
 class MOT_Tracker:
-    def __init__(self, max_age, occlusion_thres, association_thres):
+    def __init__(self, max_age, occlusion_thres, association_thres, iou_thres, context_amount, siamese_checkpoint):
         self.max_age = max_age
         self.occlusion_thres = occlusion_thres
         self.association_thres = association_thres
@@ -22,6 +22,9 @@ class MOT_Tracker:
         self.tracks = []  # save all the targets
         self._next_id = 1
         self.frame_rate = None
+        self.iou_thres = iou_thres
+        self.context_amount = context_amount
+        self.siamese_checkpoint = siamese_checkpoint
 
     @staticmethod
     def initiate_siamese_tracker(checkpoint, context_amount):
@@ -124,18 +127,19 @@ class MOT_Tracker:
             current_target_state, detection, self._next_id, self.max_age))
         self._next_id += 1
 
-    def update(self, frame_path, checkpoint, context_amount, detections, iou):
+    def update(self, cv2_image, frame_id, detections):
 
-        # init
-        frame_count = int(osp.basename(frame_path).split(".")[0])
-        if frame_count == 1:
-            self.sess, self.siamese = self.initiate_siamese_tracker(checkpoint, context_amount)
+        if frame_id == 1:
+            self.sess, self.siamese = self.initiate_siamese_tracker(self.siamese_checkpoint, self.context_amount)
         dets = np.array([d.tlwh for d in detections])  # dets: [x1,y1,w,h]
         if len(dets) == 0:
             dets_tlrb = dets
         else:
             dets_tlrb = dets.copy()
             dets_tlrb[:, 2:] += dets_tlrb[:, :2]  # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
+
+        rgb_img = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
+        # tf_image_tensor = cv2_image
 
         ###########################   STEP 1: occlusion detection   #######################
 
@@ -154,18 +158,18 @@ class MOT_Tracker:
         trks = np.zeros((len(tracked_trks), 5))  # update tracked
         ret = []
         for t, trk in enumerate(trks):  # TODO: batch prediction
-            tracked_trks[t].predict(self.sess, self.siamese, frame_path)
+            tracked_trks[t].predict(self.sess, self.siamese, rgb_img)
             pos = tracked_trks[t].track_bbox
             trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
         trks_tlrb = trks.copy()
         trks_tlrb[:, 2:4] += trks_tlrb[:, 0:2]  # convert to [xl,yl,w,h] to [x1,y1,x2,y2]
-        matched, unmatched_dets, unmatched_trks, iou_matrix = self.associate_detections_to_trackers(dets_tlrb, trks_tlrb, iou) # associate with detection
+        matched, unmatched_dets, unmatched_trks, iou_matrix = self.associate_detections_to_trackers(dets_tlrb, trks_tlrb, self.iou_thres) # associate with detection
 
         for t, trk in enumerate(tracked_trks): # refine bbox of matched track
             if t not in unmatched_trks:
                 d = int(matched[np.where(matched[:, 1] == t)[0], 0])
                 matched_iou = iou_matrix[d, t]
-                det_state = self.siamese.init_tracks(self.sess, dets[d, :4], frame_path)  # TODO: batch prediction
+                det_state = self.siamese.init_tracks(self.sess, dets[d, :4], rgb_img)  # TODO: batch prediction
                 trk.update(dets[d, :4], det_state.reid_templates, 'tracked', matched_iou, self.frame_rate)
             else: # update unmatched track
                 trk.overlap_history.append(0)
@@ -197,7 +201,7 @@ class MOT_Tracker:
             lost_trks_templates = [np.vstack(trk.current_target_state.his_feature) for trk in lost_trks]
             dets_reid_embeding, dets_trk_embeding = [], []
             for i in unmatched_dets:
-                det_state = self.siamese.init_tracks(self.sess, dets[i, :4], frame_path)
+                det_state = self.siamese.init_tracks(self.sess, dets[i, :4], rgb_img)
                 dets_reid_embeding.append(det_state.reid_templates)
                 dets_trk_embeding.append(det_state.init_templates)
             dets_reid_embeding = np.array(dets_reid_embeding)
@@ -215,12 +219,12 @@ class MOT_Tracker:
 
         # initiate targets if not match with any dets
         for i in lost_unmatched_dets:
-            self.initiate_track(dets_tlwh1[i, :4], frame_path)   # TODO: batch prediction
+            self.initiate_track(dets_tlwh1[i, :4], rgb_img)   # TODO: batch prediction
 
         ###############################   STEP 4: post processing   ###############################
 
         # remove dead tracklet
-        wh = cv2.imread(frame_path).shape
+        wh = cv2_image.shape
         i = len(self.tracks)
         for trk in reversed(self.tracks):
             i -= 1

@@ -19,9 +19,9 @@ class Track:
         self.overlap_history = [1]
         self.average_overlap = 1
 
-    def predict(self, sess, siamese, frame_path):
+    def predict(self, sess, siamese, input_image):
 
-        self.current_target_state, self.track_bbox = siamese.track(sess, self.current_target_state, frame_path)
+        self.current_target_state, self.track_bbox = siamese.track(sess, self.current_target_state, input_image)
         self.time_since_update += 1
 
     def update(self, detection, det_embeding, mode, matched_iou=1.0, frame_rate=30):

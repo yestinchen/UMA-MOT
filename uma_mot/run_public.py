@@ -99,7 +99,7 @@ def run(sequence_dir, det_dir, checkpoint, output_file,
             occlusion_thres, association_thres, display):
 
     seq_info = gather_sequence_info(sequence_dir, det_dir)
-    tracker = MOT_Tracker(max_age, occlusion_thres, association_thres)
+    tracker = MOT_Tracker(max_age, occlusion_thres, association_thres,iou, context_amount, checkpoint)
 
     conf = configparser.ConfigParser()
     conf.read(os.path.join(sequence_dir, 'seqinfo.ini'))
@@ -118,9 +118,12 @@ def run(sequence_dir, det_dir, checkpoint, output_file,
         frame_path = seq_info['image_filenames'][int(frame_idx)]
         detections = create_detections(detections, frame_idx)
 
+        # init
+        frame_id = int(os.path.basename(frame_path).split(".")[0])
+        cv2_image = cv2.imread(frame_path)
         # Update tracker.
         before_time = time.time()
-        trackers = tracker.update(frame_path, checkpoint, context_amount, detections, iou)  # tracking
+        trackers = tracker.update(cv2_image, frame_id, detections)  # tracking
         runtime.append(time.time()-before_time)
         # Store results.
         for d in trackers:

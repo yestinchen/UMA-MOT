@@ -39,7 +39,7 @@ class Siamese_Tracker(object):
     self.window = None  # Cosine window
     self.log_level = track_config['log_level']
 
-  def init_tracks(self, sess, det, filename):
+  def init_tracks(self, sess, det, input_image):
 
     # Get initial target bounding box and convert to center based
     init_bb = Rectangle(int(det[0]) - 1, int(det[1]) - 1, int(det[2]), int(det[3]))
@@ -48,7 +48,7 @@ class Siamese_Tracker(object):
     # Feed in the first frame image to set initial state.
     bbox_feed = [bbox.y, bbox.x, bbox.height, bbox.width]
     bbox_in = [init_bb.x, init_bb.y, init_bb.width, init_bb.height]
-    input_feed = [filename, bbox_feed]
+    input_feed = [input_image, bbox_feed]
     templates, reid_templates = self.siamese_model.initialize(sess, input_feed)
 
     his_feature=[]
@@ -69,7 +69,7 @@ class Siamese_Tracker(object):
                                        )   # bbox_in  [x,y,w,h]
     return current_target_state
 
-  def track(self, sess, current_target_state, filename):
+  def track(self, sess, current_target_state, input_image):
     """Runs tracking on a single image sequence."""
 
     def roi_align(image, disp_instance_feat, height, width):
@@ -151,7 +151,7 @@ class Siamese_Tracker(object):
                  current_target_state.bbox.width, current_target_state.bbox.height]
 
     templates = current_target_state.init_templates
-    input_feed = [filename, bbox_feed, templates]
+    input_feed = [input_image, bbox_feed, templates]
     outputs = self.siamese_model.inference_step(sess, input_feed)
     search_scale_list = outputs['scale_xs']
     response = outputs['response_up']  # [3,272,272]
